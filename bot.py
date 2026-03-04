@@ -210,3 +210,24 @@ async def filter_board(callback_query: types.CallbackQuery):
         await bot.edit_message_text(chat_id=user_id, message_id=msg_id,
                                     text=f"Доска:\n{stickers_display}", reply_markup=get_filter_kb())
     await callback_query.answer()
+
+
+import asyncio
+import requests
+import os
+
+async def on_startup():
+    TOKEN = os.environ.get("TOKEN")
+    if not TOKEN:
+        raise Exception("TOKEN не задан!")
+    # URL твоего Render-сервиса + маршрут webhook
+    RENDER_URL = f"https://loveboardbot.onrender.com/{TOKEN}"
+    # выставляем webhook у Telegram
+    r = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={RENDER_URL}")
+    print("Webhook setup response:", r.json())
+
+# запускаем FastAPI через uvicorn/gunicorn, aiogram будет слушать webhook
+if __name__ == "__main__":
+    import uvicorn
+    asyncio.run(on_startup())  # выставляем webhook при старте
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
