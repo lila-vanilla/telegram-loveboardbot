@@ -93,37 +93,54 @@ async def cmd_start(message: types.Message):
 
 @dp.message(Command("register"))
 async def cmd_register(message: types.Message):
-    args = message.get_args().split()
-    if len(args) != 2:
+    parts = message.text.split()
+    if len(parts) != 3:
         await message.answer("Используй: /register <логин_пары> <пароль>")
         return
-    couple_login, password = args
+
+    _, couple_login, password = parts
+
     db = load_db()
     if couple_login in db["couples"]:
         await message.answer("Пара уже существует!")
         return
-    db["couples"][couple_login] = {"password": password, "members": {}, "stickers": [], "board_message_ids": {}}
+
+    db["couples"][couple_login] = {
+        "password": password,
+        "members": {},
+        "stickers": [],
+        "board_message_ids": {}
+    }
+
     save_db(db)
     await message.answer(f"Пара '{couple_login}' создана!")
 
 @dp.message(Command("login"))
 async def cmd_login(message: types.Message, state: FSMContext):
-    args = message.get_args().split()
-    if len(args) != 3:
+    parts = message.text.split()
+    if len(parts) != 4:
         await message.answer("Используй: /login <логин_пары> <M/F> <пароль>")
         return
-    couple_login, role, password = args
+
+    _, couple_login, role, password = parts
     role = role.upper()
+
     db = load_db()
+
     if couple_login not in db["couples"]:
         await message.answer("Такой пары нет!")
         return
+
     couple = db["couples"][couple_login]
+
     if couple["password"] != password:
         await message.answer("Неверный пароль!")
         return
+
     user_login = f"{role}_{couple_login}"
+
     await state.update_data(user_login=user_login, couple_login=couple_login)
+
     if user_login not in couple["members"]:
         await message.answer("Введите своё имя:")
         await Registration.waiting_for_name.set()
@@ -131,10 +148,6 @@ async def cmd_login(message: types.Message, state: FSMContext):
         couple["members"][user_login]["chat_id"] = message.from_user.id
         save_db(db)
         await message.answer(f"Вы вошли как {couple['members'][user_login]['name']} ({role})")
-        if user_login not in couple["board_message_ids"]:
-            msg = await message.answer("Доска:\n(пусто)", reply_markup=get_filter_kb())
-            couple["board_message_ids"][user_login] = msg.message_id
-            save_db(db)
 
 # --------- Ввод имени ---------
 @dp.message(Registration.waiting_for_name)
