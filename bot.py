@@ -1,25 +1,33 @@
+import os
 import json
+from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
-from aiogram.dispatcher import FSMContext
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.dispatcher.fsm.storage.memory import MemoryStorage
+from aiogram.dispatcher.fsm.context import FSMContext
+from aiogram.dispatcher.fsm.state import StatesGroup, State
+from aiogram.utils.markdown import text
 
-TOKEN = "7906463689:AAGxKdDyTSozlc6JjLVcGkjFWpTN9byEdY4"
+# --------- Настройки ---------
+TOKEN = os.environ.get("TOKEN")
+if not TOKEN:
+    raise Exception("Environment variable TOKEN is not set!")
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(bot, storage=storage)
+dp = Dispatcher(storage=storage)
 
 DB_FILE = "db.json"
+app = FastAPI()
 
+# --------- FSM ---------
 class Registration(StatesGroup):
     waiting_for_name = State()
 
 class AddingSticker(StatesGroup):
     waiting_for_text = State()
 
+# --------- Работа с базой ---------
 def load_db():
     try:
         with open(DB_FILE, "r") as f:
@@ -31,9 +39,7 @@ def save_db(db):
     with open(DB_FILE, "w") as f:
         json.dump(db, f, indent=2)
 
-# -----------------------
-# Создаём клавиатуру фильтров
-# -----------------------
+# --------- Клавиатура фильтров ---------
 def get_filter_kb():
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("Все", callback_data="filter_all"))
@@ -41,20 +47,14 @@ def get_filter_kb():
     kb.add(InlineKeyboardButton("Партнёра", callback_data="filter_partner"))
     return kb
 
-# -----------------------
-# Преобразуем список стикеров в сетку
-# -----------------------
 def stickers_to_grid(stickers, columns=3):
     grid = ""
     for i, s in enumerate(stickers):
         grid += s["text"] + "  "
-        if (i + 1) % columns == 0:
+        if (i+1) % columns == 0:
             grid += "\n"
     return grid.strip() if grid else "(пусто)"
 
-# -----------------------
-# Обновление доски для всех участников
-# -----------------------
 async def update_board(couple_login):
     db = load_db()
     couple = db["couples"][couple_login]
@@ -71,19 +71,27 @@ async def update_board(couple_login):
             couple["board_message_ids"][u_login] = msg.message_id
             save_db(db)
 
-# -----------------------
-# Основной код регистрации, логина и добавления стикеров
-# -----------------------
-@dp.message_handler(commands=['start'])
-async def start(message: types.Message):
+# --------- FastAPI Webhook ---------
+@app.post(f"/{TOKEN}")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = types.Update(**data)
+    await dp.update.dispatch(update)
+    return {"ok": True}
+
+# --------- Команды бота ---------
+from aiogram.filters import Command
+
+@dp.message(Command("start"))
+async def cmd_start(message: types.Message):
     await message.answer(
         "Привет! LoveBoardBot ❤️\n"
         "Создать пару: /register <логин_пары> <пароль>\n"
         "Войти: /login <логин_пары> <M/F> <пароль>"
     )
 
-@dp.message_handler(commands=['register'])
-async def register(message: types.Message):
+@dp.message(Command("register"))
+async def cmd_register(message: types.Message, state: FSMContext):
     args = message.get_args().split()
     if len(args) != 2:
         await message.answer("Используй: /register <логин_пары> <пароль>")
@@ -97,8 +105,8 @@ async def register(message: types.Message):
     save_db(db)
     await message.answer(f"Пара '{couple_login}' создана!")
 
-@dp.message_handler(commands=['login'])
-async def login(message: types.Message, state: FSMContext):
+@dp.message(Command("login"))
+async def cmd_login(message: types.Message, state: FSMContext):
     args = message.get_args().split()
     if len(args) != 3:
         await message.answer("Используй: /login <логин_пары> <M/F> <пароль>")
@@ -129,7 +137,8 @@ async def login(message: types.Message, state: FSMContext):
             couple["board_message_ids"][user_login] = msg.message_id
             save_db(db)
 
-@dp.message_handler(state=Registration.waiting_for_name)
+# --------- Ввод имени ---------
+@dp.message(state=Registration.waiting_for_name)
 async def process_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
     async with state.proxy() as data:
@@ -142,10 +151,11 @@ async def process_name(message: types.Message, state: FSMContext):
     msg = await message.answer("Доска:\n(пусто)", reply_markup=get_filter_kb())
     db["couples"][couple_login]["board_message_ids"][user_login] = msg.message_id
     save_db(db)
-    await state.finish()
+    await state.clear()
 
-@dp.message_handler(commands=['add'])
-async def add_sticker(message: types.Message, state: FSMContext):
+# --------- Добавление стикера ---------
+@dp.message(Command("add"))
+async def cmd_add(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         if 'user_login' not in data:
             await message.answer("Сначала войдите через /login")
@@ -153,7 +163,7 @@ async def add_sticker(message: types.Message, state: FSMContext):
     await message.answer("Введите текст стикера:")
     await AddingSticker.waiting_for_text.set()
 
-@dp.message_handler(state=AddingSticker.waiting_for_text)
+@dp.message(state=AddingSticker.waiting_for_text)
 async def process_sticker(message: types.Message, state: FSMContext):
     text = message.text.strip()
     async with state.proxy() as data:
@@ -167,9 +177,10 @@ async def process_sticker(message: types.Message, state: FSMContext):
     save_db(db)
     await update_board(couple_login)
     await message.answer("Стикер добавлен и доска обновлена!")
-    await state.finish()
+    await state.clear()
 
-@dp.callback_query_handler(lambda c: c.data.startswith('filter_'))
+# --------- Inline-фильтры ---------
+@dp.callback_query()
 async def filter_board(callback_query: types.CallbackQuery):
     filter_type = callback_query.data.replace('filter_', '')
     db = load_db()
@@ -199,6 +210,3 @@ async def filter_board(callback_query: types.CallbackQuery):
         await bot.edit_message_text(chat_id=user_id, message_id=msg_id,
                                     text=f"Доска:\n{stickers_display}", reply_markup=get_filter_kb())
     await callback_query.answer()
-
-if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
