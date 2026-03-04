@@ -1,12 +1,13 @@
 import os
 import json
+import asyncio
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.dispatcher.fsm.storage.memory import MemoryStorage
 from aiogram.dispatcher.fsm.context import FSMContext
 from aiogram.dispatcher.fsm.state import StatesGroup, State
-from aiogram.utils.markdown import text
+from aiogram.filters import Command
 
 # --------- Настройки ---------
 TOKEN = os.environ.get("TOKEN")
@@ -64,8 +65,13 @@ async def update_board(couple_login):
         stickers_display = stickers_to_grid(couple["stickers"], columns=3)
         kb = get_filter_kb()
         if msg_id:
-            await bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
-                                        text=f"Доска:\n{stickers_display}", reply_markup=kb)
+            try:
+                await bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
+                                            text=f"Доска:\n{stickers_display}", reply_markup=kb)
+            except:
+                msg = await bot.send_message(chat_id, f"Доска:\n{stickers_display}", reply_markup=kb)
+                couple["board_message_ids"][u_login] = msg.message_id
+                save_db(db)
         else:
             msg = await bot.send_message(chat_id, f"Доска:\n{stickers_display}", reply_markup=kb)
             couple["board_message_ids"][u_login] = msg.message_id
@@ -76,12 +82,10 @@ async def update_board(couple_login):
 async def telegram_webhook(req: Request):
     data = await req.json()
     update = types.Update(**data)
-    await dp.update.dispatch(update)
+    await dp.process_update(update)
     return {"ok": True}
 
 # --------- Команды бота ---------
-from aiogram.filters import Command
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -211,23 +215,14 @@ async def filter_board(callback_query: types.CallbackQuery):
                                     text=f"Доска:\n{stickers_display}", reply_markup=get_filter_kb())
     await callback_query.answer()
 
-
-import asyncio
-import requests
-import os
-
+# --------- Установка webhook при старте ---------
 async def on_startup():
-    TOKEN = os.environ.get("TOKEN")
-    if not TOKEN:
-        raise Exception("TOKEN не задан!")
-    # URL твоего Render-сервиса + маршрут webhook
-    RENDER_URL = f"https://loveboardbot.onrender.com/{TOKEN}"
-    # выставляем webhook у Telegram
+    RENDER_URL = f"https://loveboardbot.onrender.com/{TOKEN}"  # <-- замени на свой URL
     r = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={RENDER_URL}")
     print("Webhook setup response:", r.json())
-
-# запускаем FastAPI через uvicorn/gunicorn, aiogram будет слушать webhook
+    
+# --------- Для локального теста ---------
 if __name__ == "__main__":
     import uvicorn
-    asyncio.run(on_startup())  # выставляем webhook при старте
+    asyncio.run(on_startup())
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
