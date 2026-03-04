@@ -1,13 +1,15 @@
 import os
 import json
 import asyncio
+import requests
 from fastapi import FastAPI, Request
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 
 # --------- Настройки ---------
 TOKEN = os.environ.get("TOKEN")
@@ -142,7 +144,7 @@ async def cmd_login(message: types.Message, state: FSMContext):
             save_db(db)
 
 # --------- Ввод имени ---------
-@dp.message(state=Registration.waiting_for_name)
+@dp.message(StateFilter(Registration.waiting_for_name))
 async def process_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
     async with state.proxy() as data:
@@ -167,7 +169,7 @@ async def cmd_add(message: types.Message, state: FSMContext):
     await message.answer("Введите текст стикера:")
     await AddingSticker.waiting_for_text.set()
 
-@dp.message(state=AddingSticker.waiting_for_text)
+@dp.message(StateFilter(AddingSticker.waiting_for_text))
 async def process_sticker(message: types.Message, state: FSMContext):
     text = message.text.strip()
     async with state.proxy() as data:
