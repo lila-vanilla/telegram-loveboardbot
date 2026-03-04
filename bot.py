@@ -180,7 +180,7 @@ async def cmd_add(message: types.Message, state: FSMContext):
         await message.answer("Сначала войдите через /login")
         return
     await message.answer("Введите текст стикера:")
-    await AddingSticker.waiting_for_text.set()
+    await state.set_state(AddingSticker.waiting_for_text)
 
 @dp.message(AddingSticker.waiting_for_text)
 async def process_sticker(message: types.Message, state: FSMContext):
