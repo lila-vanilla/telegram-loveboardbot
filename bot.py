@@ -1,20 +1,17 @@
 import os
 import json
-import asyncio
-import requests
 from fastapi import FastAPI, Request
-
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 
 # --------- Настройки ---------
 TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
-    raise Exception("Environment variable TOKEN is not set!")
+    raise Exception("TOKEN не задан!")
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
@@ -42,7 +39,7 @@ def save_db(db):
     with open(DB_FILE, "w") as f:
         json.dump(db, f, indent=2)
 
-# --------- Клавиатура фильтров ---------
+# --------- Клавиатура ---------
 def get_filter_kb():
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("Все", callback_data="filter_all"))
@@ -71,9 +68,7 @@ async def update_board(couple_login):
                 await bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
                                             text=f"Доска:\n{stickers_display}", reply_markup=kb)
             except:
-                msg = await bot.send_message(chat_id, f"Доска:\n{stickers_display}", reply_markup=kb)
-                couple["board_message_ids"][u_login] = msg.message_id
-                save_db(db)
+                pass  # Игнорировать ошибки редактирования
         else:
             msg = await bot.send_message(chat_id, f"Доска:\n{stickers_display}", reply_markup=kb)
             couple["board_message_ids"][u_login] = msg.message_id
@@ -87,7 +82,7 @@ async def telegram_webhook(req: Request):
     await dp.process_update(update)
     return {"ok": True}
 
-# --------- Команды бота ---------
+# --------- Команды ---------
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
@@ -97,7 +92,7 @@ async def cmd_start(message: types.Message):
     )
 
 @dp.message(Command("register"))
-async def cmd_register(message: types.Message, state: FSMContext):
+async def cmd_register(message: types.Message):
     args = message.get_args().split()
     if len(args) != 2:
         await message.answer("Используй: /register <логин_пары> <пароль>")
@@ -128,9 +123,7 @@ async def cmd_login(message: types.Message, state: FSMContext):
         await message.answer("Неверный пароль!")
         return
     user_login = f"{role}_{couple_login}"
-    async with state.proxy() as data:
-        data['user_login'] = user_login
-        data['couple_login'] = couple_login
+    await state.update_data(user_login=user_login, couple_login=couple_login)
     if user_login not in couple["members"]:
         await message.answer("Введите своё имя:")
         await Registration.waiting_for_name.set()
@@ -144,12 +137,12 @@ async def cmd_login(message: types.Message, state: FSMContext):
             save_db(db)
 
 # --------- Ввод имени ---------
-@dp.message(StateFilter(Registration.waiting_for_name))
+@dp.message(Registration.waiting_for_name)
 async def process_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
-    async with state.proxy() as data:
-        user_login = data['user_login']
-        couple_login = data['couple_login']
+    data = await state.get_data()
+    user_login = data['user_login']
+    couple_login = data['couple_login']
     db = load_db()
     db["couples"][couple_login]["members"][user_login] = {"name": name, "role": user_login[0], "chat_id": message.from_user.id}
     save_db(db)
@@ -162,23 +155,23 @@ async def process_name(message: types.Message, state: FSMContext):
 # --------- Добавление стикера ---------
 @dp.message(Command("add"))
 async def cmd_add(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        if 'user_login' not in data:
-            await message.answer("Сначала войдите через /login")
-            return
+    data = await state.get_data()
+    if 'user_login' not in data:
+        await message.answer("Сначала войдите через /login")
+        return
     await message.answer("Введите текст стикера:")
     await AddingSticker.waiting_for_text.set()
 
-@dp.message(StateFilter(AddingSticker.waiting_for_text))
+@dp.message(AddingSticker.waiting_for_text)
 async def process_sticker(message: types.Message, state: FSMContext):
-    text = message.text.strip()
-    async with state.proxy() as data:
-        user_login = data['user_login']
-        couple_login = data['couple_login']
+    text_content = message.text.strip()
+    data = await state.get_data()
+    user_login = data['user_login']
+    couple_login = data['couple_login']
     db = load_db()
     member = db["couples"][couple_login]["members"][user_login]
     color_emoji = "🔵" if member["role"]=="M" else "🌸"
-    sticker_text = f"{color_emoji} {member['name']}: {text}"
+    sticker_text = f"{color_emoji} {member['name']}: {text_content}"
     db["couples"][couple_login]["stickers"].append({"owner": user_login, "text": sticker_text})
     save_db(db)
     await update_board(couple_login)
@@ -216,15 +209,3 @@ async def filter_board(callback_query: types.CallbackQuery):
         await bot.edit_message_text(chat_id=user_id, message_id=msg_id,
                                     text=f"Доска:\n{stickers_display}", reply_markup=get_filter_kb())
     await callback_query.answer()
-
-# --------- Установка webhook при старте ---------
-async def on_startup():
-    RENDER_URL = f"https://loveboardbot.onrender.com/{TOKEN}"  # <-- замени на свой URL
-    r = requests.get(f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={RENDER_URL}")
-    print("Webhook setup response:", r.json())
-    
-# --------- Для локального теста ---------
-if __name__ == "__main__":
-    import uvicorn
-    asyncio.run(on_startup())
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
