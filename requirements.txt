@@ -3,4 +3,5 @@ fastapi==0.109.1
 uvicorn[standard]==0.23.1
 gunicorn==21.2.0
 requests==2.31.0
-motor==3.1.1
+motor==4.3.0   # актуальная версия для последних pymongo
+pymongo>=5.0.0  # обязательно >=5
