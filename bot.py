@@ -79,7 +79,7 @@ async def update_board(couple_login):
 async def telegram_webhook(req: Request):
     data = await req.json()
     update = types.Update(**data)
-    await dp.process_update(update)
+    await dp.feed_update(bot, update)
     return {"ok": True}
 
 # --------- Команды ---------
