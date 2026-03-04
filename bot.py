@@ -154,16 +154,23 @@ async def cmd_login(message: types.Message, state: FSMContext):
 async def process_name(message: types.Message, state: FSMContext):
     name = message.text.strip()
     data = await state.get_data()
+
     user_login = data['user_login']
     couple_login = data['couple_login']
+
     db = load_db()
-    db["couples"][couple_login]["members"][user_login] = {"name": name, "role": user_login[0], "chat_id": message.from_user.id}
+
+    db["couples"][couple_login]["members"][user_login] = {
+        "name": name,
+        "role": user_login[0],
+        "chat_id": message.from_user.id
+    }
+
     save_db(db)
+
     await message.answer(f"Приятно познакомиться, {name}! /add чтобы добавить стикер")
-    msg = await message.answer("Доска:\n(пусто)", reply_markup=get_filter_kb())
-    db["couples"][couple_login]["board_message_ids"][user_login] = msg.message_id
-    save_db(db)
-    await state.clear()
+
+    await state.clear()   # ЭТО ВАЖНО
 
 # --------- Добавление стикера ---------
 @dp.message(Command("add"))
