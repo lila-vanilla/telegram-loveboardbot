@@ -232,10 +232,10 @@ async def filter_board(callback: types.CallbackQuery):
 
 # --------- FastAPI webhook ---------
 @app.post(f"/{TOKEN}")
-async def telegram_webhook(req: Request):
-    data = await req.json()
-    update = types.Update(**data)
-    await dp.update.dispatch(update)
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = types.Update.model_validate(data)
+    await dp.feed_update(bot, update)
     return {"ok": True}
 
 # --------- Запуск ---------
