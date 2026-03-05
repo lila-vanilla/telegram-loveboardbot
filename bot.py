@@ -211,14 +211,43 @@ async def cmd_login(message: types.Message, state: FSMContext):
         await message.answer(f"Вы вошли как {m[2]} ({role})")
         await update_board(couple_login, message.from_user.id)
 
+
+@dp.message(Command("add"))
+async def cmd_add(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT couple_login, user_login FROM members WHERE chat_id=?", (user_id,))
+    res = c.fetchone()
+    conn.close()
+
+    if not res:
+        await message.answer("Сначала войдите через /login")
+        return
+
+    couple_login, user_login = res
+
+    await state.set_state(AddingSticker.waiting_for_text)
+    await state.update_data(
+        couple_login=couple_login,
+        user_login=user_login
+    )
+
+    await message.answer("Введите текст стикера:")
+    
+
 # --------- Обработка текста ---------
+@dp.message()
 @dp.message()
 async def process_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
     current_state = await state.get_state()
 
+    # -------- Регистрация имени --------
     if current_state == Registration.waiting_for_name.state:
         name = message.text.strip()
+
         add_member(
             data['user_login'],
             data['couple_login'],
@@ -227,8 +256,39 @@ async def process_text(message: types.Message, state: FSMContext):
             message.from_user.id
         )
 
-        await message.answer(f"Приятно познакомиться, {name}! /add чтобы добавить стикер")
+        await message.answer(
+            f"Приятно познакомиться, {name}! ❤️\n"
+            "Теперь можно добавить стикер через /add"
+        )
+
         await update_board(data['couple_login'], message.from_user.id)
+        await state.clear()
+        return
+
+    # -------- Добавление стикера --------
+    if current_state == AddingSticker.waiting_for_text.state:
+        member = get_member(data['user_login'])
+
+        if not member:
+            await message.answer("Ошибка. Попробуйте войти заново через /login")
+            await state.clear()
+            return
+
+        name = member[2]
+        role = member[3]
+
+        color = "🔵" if role == "M" else "🌸"
+        sticker_text = f"{color} {name}: {message.text.strip()}"
+
+        add_sticker(
+            data['couple_login'],
+            data['user_login'],
+            sticker_text
+        )
+
+        await message.answer("Стикер добавлен! 💌")
+        await update_board(data['couple_login'], message.from_user.id)
+
         await state.clear()
         return
 
