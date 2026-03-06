@@ -1,6 +1,6 @@
 import os
 import psycopg
-import bcrypt
+from passlib.context import CryptContext
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
@@ -13,6 +13,9 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+hashed_password = pwd_context.hash(password)
 
 
 # ---------------- DB ----------------
