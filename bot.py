@@ -1,5 +1,5 @@
 import os
-import psycopg2
+import psycopg
 import bcrypt
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
@@ -18,7 +18,7 @@ app = FastAPI()
 # ---------------- DB ----------------
 
 def get_conn():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg.connect(DATABASE_URL)
 
 
 def init_db():
