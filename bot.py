@@ -1,236 +1,220 @@
 import os
 import psycopg
-from passlib.context import CryptContext
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.storage.memory import MemoryStorage
+from passlib.context import CryptContext
 
-TOKEN = os.environ.get("TOKEN")
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# -----------------------
+# ENV
+# -----------------------
+
+TOKEN = os.getenv("TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+if not TOKEN:
+    raise Exception("TOKEN not set")
+
+if not DATABASE_URL:
+    raise Exception("DATABASE_URL not set")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-hashed_password = pwd_context.hash(password)
-pwd_context.verify(password, hashed_password)
 
-
-# ---------------- DB ----------------
+# -----------------------
+# DATABASE
+# -----------------------
 
 def get_conn():
     return psycopg.connect(DATABASE_URL)
 
-
 def init_db():
-    conn = get_conn()
-    cur = conn.cursor()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS couples(
-        id SERIAL PRIMARY KEY,
-        login TEXT UNIQUE,
-        password_hash TEXT
-    )
-    """)
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS couples (
+                login TEXT PRIMARY KEY,
+                password TEXT
+            )
+            """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS members(
-        id SERIAL PRIMARY KEY,
-        user_login TEXT,
-        couple_login TEXT,
-        name TEXT,
-        role TEXT,
-        chat_id BIGINT
-    )
-    """)
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS members (
+                user_login TEXT PRIMARY KEY,
+                couple_login TEXT,
+                name TEXT,
+                role TEXT,
+                chat_id BIGINT
+            )
+            """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS stickers(
-        id SERIAL PRIMARY KEY,
-        couple_login TEXT,
-        owner TEXT,
-        text TEXT
-    )
-    """)
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS stickers (
+                id SERIAL PRIMARY KEY,
+                couple_login TEXT,
+                owner TEXT,
+                text TEXT
+            )
+            """)
 
-    conn.commit()
-    conn.close()
-
-
-# ---------------- PASSWORD ----------------
-
-def hash_password(password: str):
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-
-
-def check_password(password: str, hashed: str):
-    return bcrypt.checkpw(password.encode(), hashed.encode())
-
-
-# ---------------- COUPLES ----------------
+# -----------------------
+# COUPLES
+# -----------------------
 
 def add_couple(login, password):
 
-    conn = get_conn()
-    cur = conn.cursor()
+    hashed = pwd_context.hash(password)
 
-    password_hash = hash_password(password)
-
-    cur.execute(
-        "INSERT INTO couples(login,password_hash) VALUES(%s,%s)",
-        (login, password_hash)
-    )
-
-    conn.commit()
-    conn.close()
-
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO couples (login, password) VALUES (%s,%s)",
+                (login, hashed)
+            )
 
 def get_couple(login):
 
-    conn = get_conn()
-    cur = conn.cursor()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT login,password FROM couples WHERE login=%s",
+                (login,)
+            )
+            return cur.fetchone()
 
-    cur.execute(
-        "SELECT login,password_hash FROM couples WHERE login=%s",
-        (login,)
-    )
+def check_password(password, hashed):
+    return pwd_context.verify(password, hashed)
 
-    res = cur.fetchone()
-
-    conn.close()
-
-    return res
-
-
-# ---------------- MEMBERS ----------------
+# -----------------------
+# MEMBERS
+# -----------------------
 
 def add_member(user_login, couple_login, name, role, chat_id):
 
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-    INSERT INTO members(user_login,couple_login,name,role,chat_id)
-    VALUES(%s,%s,%s,%s,%s)
-    """, (user_login, couple_login, name, role, chat_id))
-
-    conn.commit()
-    conn.close()
-
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+            INSERT INTO members
+            (user_login,couple_login,name,role,chat_id)
+            VALUES (%s,%s,%s,%s,%s)
+            ON CONFLICT (user_login)
+            DO UPDATE SET chat_id = EXCLUDED.chat_id
+            """,
+            (user_login,couple_login,name,role,chat_id)
+            )
 
 def get_member(user_login):
 
-    conn = get_conn()
-    cur = conn.cursor()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM members WHERE user_login=%s",
+                (user_login,)
+            )
+            return cur.fetchone()
 
-    cur.execute(
-        "SELECT * FROM members WHERE user_login=%s",
-        (user_login,)
-    )
-
-    res = cur.fetchone()
-
-    conn.close()
-
-    return res
-
-
-# ---------------- STICKERS ----------------
+# -----------------------
+# STICKERS
+# -----------------------
 
 def add_sticker(couple_login, owner, text):
 
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("""
-    INSERT INTO stickers(couple_login,owner,text)
-    VALUES(%s,%s,%s)
-    """, (couple_login, owner, text))
-
-    conn.commit()
-    conn.close()
-
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO stickers (couple_login,owner,text) VALUES (%s,%s,%s)",
+                (couple_login,owner,text)
+            )
 
 def get_stickers(couple_login):
 
-    conn = get_conn()
-    cur = conn.cursor()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT owner,text FROM stickers WHERE couple_login=%s",
+                (couple_login,)
+            )
+            return cur.fetchall()
 
-    cur.execute("""
-    SELECT owner,text FROM stickers
-    WHERE couple_login=%s
-    """, (couple_login,))
+# -----------------------
+# UI
+# -----------------------
 
-    res = cur.fetchall()
-
-    conn.close()
-
-    return res
-
-
-# ---------------- UI ----------------
-
-def keyboard():
+def get_filter_kb():
 
     kb = InlineKeyboardBuilder()
 
-    kb.button(text="Все", callback_data="all")
-    kb.button(text="Мои", callback_data="mine")
+    kb.button(text="Все", callback_data="filter_all")
+    kb.button(text="Мои", callback_data="filter_mine")
+    kb.button(text="Партнера", callback_data="filter_partner")
 
-    kb.adjust(2)
+    kb.adjust(3)
 
     return kb.as_markup()
 
+def board_text(stickers):
+
+    if not stickers:
+        return "Доска пустая"
+
+    return "\n".join([s[1] for s in stickers])
 
 async def update_board(couple_login, chat_id):
 
     stickers = get_stickers(couple_login)
 
-    if not stickers:
-        text = "Доска пуста"
-    else:
-        text = "\n".join([s[1] for s in stickers])
+    text = "❤️ LoveBoard\n\n" + board_text(stickers)
 
     await bot.send_message(
         chat_id,
-        "❤️ LoveBoard\n\n" + text,
-        reply_markup=keyboard()
+        text,
+        reply_markup=get_filter_kb()
     )
 
-
-# ---------------- COMMANDS ----------------
+# -----------------------
+# COMMANDS
+# -----------------------
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
 
     await message.answer(
-        "LoveBoardBot\n\n"
+        "LoveBoard ❤️\n\n"
         "/register login password\n"
         "/login login M/F password\n"
         "/add текст"
     )
 
+# -----------------------
 
 @dp.message(Command("register"))
-async def cmd_register(message: types.Message):
+async def register(message: types.Message):
 
     args = message.text.split()[1:]
 
     if len(args) != 2:
-        await message.answer("Используй: /register <логин> <пароль>")
+        await message.answer("/register login password")
         return
 
     login = args[0]
     password = args[1]
 
+    if get_couple(login):
+        await message.answer("Пара уже существует")
+        return
+
     add_couple(login, password)
 
-    await message.answer("Пара создана ❤️")
+    await message.answer("Пара создана!")
 
+# -----------------------
 
 @dp.message(Command("login"))
 async def login(message: types.Message):
@@ -238,71 +222,121 @@ async def login(message: types.Message):
     args = message.text.split()[1:]
 
     if len(args) != 3:
-        await message.answer("Используй: /login login M/F password")
+        await message.answer("/login login M/F password")
         return
 
-    login, role, password = args
+    couple_login = args[0]
+    role = args[1].upper()
+    password = args[2]
 
-    couple = get_couple(login)
+    couple = get_couple(couple_login)
 
     if not couple:
-        await message.answer("Пары нет")
+        await message.answer("Пара не найдена")
         return
 
     if not check_password(password, couple[1]):
-        await message.answer("Пароль неверный")
+        await message.answer("Неверный пароль")
         return
 
-    user_login = f"{role}_{login}"
+    user_login = f"{role}_{couple_login}"
 
     add_member(
         user_login,
-        login,
+        couple_login,
         role,
         role,
         message.from_user.id
     )
 
-    await message.answer("Вы вошли ❤️")
+    await message.answer("Вход выполнен")
 
-    await update_board(login, message.from_user.id)
+    await update_board(couple_login, message.from_user.id)
 
+# -----------------------
 
 @dp.message(Command("add"))
 async def add(message: types.Message):
 
-    text = message.text.replace("/add", "").strip()
+    text = message.text.replace("/add","").strip()
 
     if not text:
-        await message.answer("Напиши: /add текст")
+        await message.answer("/add текст")
         return
 
-    conn = get_conn()
-    cur = conn.cursor()
+    user_id = message.from_user.id
 
-    cur.execute(
-        "SELECT couple_login,user_login FROM members WHERE chat_id=%s",
-        (message.from_user.id,)
-    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
 
-    res = cur.fetchone()
+            cur.execute(
+                "SELECT couple_login,user_login,name,role FROM members WHERE chat_id=%s",
+                (user_id,)
+            )
 
-    conn.close()
+            res = cur.fetchone()
 
     if not res:
         await message.answer("Сначала /login")
         return
 
-    couple_login, user_login = res
+    couple_login,user_login,name,role = res
 
-    sticker = f"📝 {text}"
+    color = "🔵" if role=="M" else "🌸"
 
-    add_sticker(couple_login, user_login, sticker)
+    sticker = f"{color} {name}: {text}"
 
-    await update_board(couple_login, message.from_user.id)
+    add_sticker(couple_login,user_login,sticker)
 
+    await update_board(couple_login,user_id)
 
-# ---------------- WEBHOOK ----------------
+# -----------------------
+# CALLBACK
+# -----------------------
+
+@dp.callback_query()
+async def filters(callback: types.CallbackQuery):
+
+    action = callback.data
+
+    user_id = callback.from_user.id
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+
+            cur.execute(
+                "SELECT couple_login,user_login FROM members WHERE chat_id=%s",
+                (user_id,)
+            )
+
+            res = cur.fetchone()
+
+    if not res:
+        await callback.answer()
+        return
+
+    couple_login,user_login = res
+
+    stickers = get_stickers(couple_login)
+
+    if action=="filter_mine":
+        stickers = [s for s in stickers if s[0]==user_login]
+
+    if action=="filter_partner":
+        stickers = [s for s in stickers if s[0]!=user_login]
+
+    text = "❤️ LoveBoard\n\n" + board_text(stickers)
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_filter_kb()
+    )
+
+    await callback.answer()
+
+# -----------------------
+# WEBHOOK
+# -----------------------
 
 @app.post(f"/{TOKEN}")
 async def webhook(req: Request):
@@ -315,7 +349,13 @@ async def webhook(req: Request):
 
     return {"ok": True}
 
+# -----------------------
+# START
+# -----------------------
 
-# ---------------- START ----------------
+@app.on_event("startup")
+async def startup():
 
-init_db()
+    init_db()
+
+    await bot.set_webhook(f"{WEBHOOK_URL}/{TOKEN}")
