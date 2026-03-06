@@ -16,6 +16,7 @@ app = FastAPI()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 hashed_password = pwd_context.hash(password)
+pwd_context.verify(password, hashed_password)
 
 
 # ---------------- DB ----------------
