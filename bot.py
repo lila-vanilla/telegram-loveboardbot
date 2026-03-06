@@ -216,19 +216,16 @@ async def start(message: types.Message):
 
 
 @dp.message(Command("register"))
-async def register(message: types.Message):
+async def cmd_register(message: types.Message):
 
     args = message.text.split()[1:]
 
     if len(args) != 2:
-        await message.answer("Используй: /register login password")
+        await message.answer("Используй: /register <логин> <пароль>")
         return
 
-    login, password = args
-
-    if get_couple(login):
-        await message.answer("Пара уже существует")
-        return
+    login = args[0]
+    password = args[1]
 
     add_couple(login, password)
 
